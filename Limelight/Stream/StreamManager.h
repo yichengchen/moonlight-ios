@@ -11,6 +11,8 @@
 
 @interface StreamManager : NSOperation
 
+@property (nonatomic, readonly, weak)VideoDecoderRenderer* renderer;
+
 - (id) initWithConfig:(StreamConfiguration*)config renderView:(UIView*)view connectionCallbacks:(id<ConnectionCallbacks>)callback;
 
 - (void) stopStream;

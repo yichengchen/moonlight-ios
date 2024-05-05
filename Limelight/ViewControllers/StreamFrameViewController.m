@@ -44,19 +44,37 @@
     UILabel *_tipLabel;
     UIActivityIndicatorView *_spinner;
     StreamView *_streamView;
+    UIView *_renderView;
     UIScrollView *_scrollView;
     BOOL _userIsInteracting;
     CGSize _keyboardSize;
     
 #if !TARGET_OS_TV
     UIScreenEdgePanGestureRecognizer *_exitSwipeRecognizer;
+    UIWindow *_extWindow;
 #endif
 }
 
 - (void)viewDidAppear:(BOOL)animated
 {
     [super viewDidAppear:animated];
+        
+#if !TARGET_OS_TV
+    if (UIScreen.screens.count > 1) {
+        [self enterExtScreen:UIScreen.screens.lastObject];
+    }
     
+    [[NSNotificationCenter defaultCenter] addObserver: self
+                                             selector: @selector(extScreenDidConnect:)
+                                                 name: UIScreenDidConnectNotification
+                                               object: nil];
+    
+    [[NSNotificationCenter defaultCenter] addObserver: self
+                                             selector: @selector(extScreenDidDisconnect:)
+                                                 name: UIScreenDidDisconnectNotification
+                                               object: nil];
+#endif
+
 #if !TARGET_OS_TV
     [[self revealViewController] setPrimaryViewController:self];
 #endif
@@ -110,6 +128,8 @@
     _streamView = [[StreamView alloc] initWithFrame:self.view.frame];
     [_streamView setupStreamView:_controllerSupport interactionDelegate:self config:self.streamConfig];
     
+    _renderView = [[UIView alloc] initWithFrame:self.view.frame];
+    _renderView.userInteractionEnabled = NO;
 #if TARGET_OS_TV
     if (!_menuTapGestureRecognizer || !_menuDoubleTapGestureRecognizer || !_playPauseTapGestureRecognizer) {
         _menuTapGestureRecognizer = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(controllerPauseButtonPressed:)];
@@ -152,11 +172,10 @@
     _tipLabel.center = CGPointMake(self.view.frame.size.width / 2, self.view.frame.size.height * 0.9);
     
     _streamMan = [[StreamManager alloc] initWithConfig:self.streamConfig
-                                            renderView:_streamView
+                                            renderView:_renderView
                                    connectionCallbacks:self];
     NSOperationQueue* opQueue = [[NSOperationQueue alloc] init];
     [opQueue addOperation:_streamMan];
-    
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(applicationWillResignActive:)
                                                  name:UIApplicationWillResignActiveNotification
@@ -198,21 +217,31 @@
         [_scrollView setMaximumZoomScale:10.0f];
         
         // Add StreamView inside a UIScrollView for absolute mode
+        [_scrollView addSubview:_renderView];
         [_scrollView addSubview:_streamView];
         [self.view addSubview:_scrollView];
     }
     else {
         // Add StreamView directly in relative mode
+        [self.view addSubview:_renderView];
         [self.view addSubview:_streamView];
     }
-    
     [self.view addSubview:_stageLabel];
     [self.view addSubview:_spinner];
     [self.view addSubview:_tipLabel];
 }
 
+
+- (void)updateRenderView {
+    if (_settings.absoluteTouchMode) {
+        [_scrollView insertSubview:_renderView atIndex:0];
+    } else {
+        [self.view insertSubview:_renderView atIndex:0];
+    }
+}
+
 - (UIView *)viewForZoomingInScrollView:(UIScrollView *)scrollView {
-    return _streamView;
+    return _renderView;
 }
 
 - (void)willMoveToParentViewController:(UIViewController *)parent {
@@ -313,7 +342,52 @@
     _statsUpdateTimer = nil;
     
     [self.navigationController popToRootViewControllerAnimated:YES];
+#if !TARGET_OS_TV
+    _extWindow = nil;
+#endif
 }
+
+// External Screen connected
+- (void)extScreenDidConnect:(NSNotification *)notification {
+    Log(LOG_I, @"External Screen Connected");
+    dispatch_async(dispatch_get_main_queue(), ^{
+    [self enterExtScreen:notification.object];
+    });
+}
+
+// External Screen disconnected
+- (void)extScreenDidDisconnect:(NSNotification *)notification {
+    Log(LOG_I, @"External Screen Disconnected");
+    if(UIScreen.screens.count < 2)
+    {
+        dispatch_async(dispatch_get_main_queue(), ^{
+        [self removeExtScreen];
+        });
+    }
+}
+
+#if !TARGET_OS_TV
+- (void)enterExtScreen:(UIScreen*)extScreen {
+    Log(LOG_I, @"Enter External Screen");
+    extScreen.overscanCompensation = UIScreenOverscanCompensationNone;
+    _extWindow = [[UIWindow alloc] initWithFrame:extScreen.bounds];
+    _extWindow.screen = extScreen;
+    [_renderView removeFromSuperview];
+    [_extWindow addSubview:_renderView];
+    _renderView.frame = _extWindow.bounds;
+    [_streamMan.renderer reinitializeDisplayLayer];
+    _extWindow.hidden = NO;
+}
+
+- (void)removeExtScreen {
+    Log(LOG_I, @"Removing External Screen");
+    _extWindow.hidden = YES;
+    [_renderView removeFromSuperview];
+    _renderView.frame = self.view.frame;
+    [self updateRenderView];
+    [_streamMan.renderer reinitializeDisplayLayer];
+}
+#endif
 
 // This will fire if the user opens control center or gets a low battery message
 - (void)applicationWillResignActive:(NSNotification *)notification {
