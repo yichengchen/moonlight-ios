@@ -89,7 +89,6 @@ extern int ff_isom_write_av1c(AVIOContext *pb, const uint8_t *buf, int size,
     parameterSetBuffers = [[NSMutableArray alloc] init];
     
     [self reinitializeDisplayLayer];
-    
     return self;
 }
 

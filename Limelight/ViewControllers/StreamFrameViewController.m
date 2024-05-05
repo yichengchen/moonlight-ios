@@ -50,13 +50,30 @@
     
 #if !TARGET_OS_TV
     UIScreenEdgePanGestureRecognizer *_exitSwipeRecognizer;
+    UIWindow *_extWindow;
 #endif
 }
 
 - (void)viewDidAppear:(BOOL)animated
 {
     [super viewDidAppear:animated];
+        
+#if !TARGET_OS_TV
+    if (UIScreen.screens.count > 1) {
+        [self enterExtScreen:UIScreen.screens.lastObject];
+    }
     
+    [[NSNotificationCenter defaultCenter] addObserver: self
+                                             selector: @selector(extScreenDidConnect:)
+                                                 name: UIScreenDidConnectNotification
+                                               object: nil];
+    
+    [[NSNotificationCenter defaultCenter] addObserver: self
+                                             selector: @selector(extScreenDidDisconnect:)
+                                                 name: UIScreenDidDisconnectNotification
+                                               object: nil];
+#endif
+
 #if !TARGET_OS_TV
     [[self revealViewController] setPrimaryViewController:self];
 #endif
@@ -156,7 +173,6 @@
                                    connectionCallbacks:self];
     NSOperationQueue* opQueue = [[NSOperationQueue alloc] init];
     [opQueue addOperation:_streamMan];
-    
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(applicationWillResignActive:)
                                                  name:UIApplicationWillResignActiveNotification
@@ -186,6 +202,15 @@
                                                object: nil];
 #endif
     
+    [self setupStreamView];
+    
+    [self.view addSubview:_stageLabel];
+    [self.view addSubview:_spinner];
+    [self.view addSubview:_tipLabel];
+}
+
+
+- (void)setupStreamView {
     // Only enable scroll and zoom in absolute touch mode
     if (_settings.absoluteTouchMode) {
         _scrollView = [[UIScrollView alloc] initWithFrame:self.view.frame];
@@ -205,10 +230,6 @@
         // Add StreamView directly in relative mode
         [self.view addSubview:_streamView];
     }
-    
-    [self.view addSubview:_stageLabel];
-    [self.view addSubview:_spinner];
-    [self.view addSubview:_tipLabel];
 }
 
 - (UIView *)viewForZoomingInScrollView:(UIScrollView *)scrollView {
@@ -313,7 +334,52 @@
     _statsUpdateTimer = nil;
     
     [self.navigationController popToRootViewControllerAnimated:YES];
+#if !TARGET_OS_TV
+    _extWindow = nil;
+#endif
 }
+
+// External Screen connected
+- (void)extScreenDidConnect:(NSNotification *)notification {
+    Log(LOG_I, @"External Screen Connected");
+    dispatch_async(dispatch_get_main_queue(), ^{
+    [self enterExtScreen:notification.object];
+    });
+}
+
+// External Screen disconnected
+- (void)extScreenDidDisconnect:(NSNotification *)notification {
+    Log(LOG_I, @"External Screen Disconnected");
+    if(UIScreen.screens.count < 2)
+    {
+        dispatch_async(dispatch_get_main_queue(), ^{
+        [self removeExtScreen];
+        });
+    }
+}
+
+#if !TARGET_OS_TV
+- (void)enterExtScreen:(UIScreen*)extScreen {
+    Log(LOG_I, @"Enter External Screen");
+    extScreen.overscanCompensation = UIScreenOverscanCompensationNone;
+    _extWindow = [[UIWindow alloc] initWithFrame:extScreen.bounds];
+    _extWindow.screen = extScreen;
+    [_streamView removeFromSuperview];
+    [_extWindow addSubview:_streamView];
+    _streamView.frame = _extWindow.bounds;
+    [_streamMan.renderer reinitializeDisplayLayer];
+    _extWindow.hidden = NO;
+}
+
+- (void)removeExtScreen {
+    Log(LOG_I, @"Removing External Screen");
+    _extWindow.hidden = YES;
+    [_streamView removeFromSuperview];
+    _streamView.frame = self.view.frame;
+    [self setupStreamView];
+    [_streamMan.renderer reinitializeDisplayLayer];
+}
+#endif
 
 // This will fire if the user opens control center or gets a low battery message
 - (void)applicationWillResignActive:(NSNotification *)notification {
