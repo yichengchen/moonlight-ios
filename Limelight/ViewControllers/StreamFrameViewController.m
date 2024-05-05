@@ -209,6 +209,14 @@
     [self.view addSubview:_tipLabel];
 }
 
+#if !TARGET_OS_TV
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    if (UIScreen.screens.count == 1) {
+        _streamView.frame = self.view.frame;
+        [_streamMan.renderer reinitializeDisplayLayer];
+    }
+}
+#endif
 
 - (void)setupStreamView {
     // Only enable scroll and zoom in absolute touch mode
